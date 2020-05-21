@@ -8,15 +8,34 @@ class DataType(abc.ABCMeta):
         pass
 
     @abc.abstractmethod
-    def sample_one(self):
+    def step_forward_one(self):
         pass
 
     @abc.abstractmethod
-    def sample_n(self, n):
+    def step_forward_n(self, n):
         pass
 
 
-class RandomWalk(DataType):
+class BrownianMotion(DataType):
+    """A simple Brownian motion. The standard deviation of the normally-distributed
+    next sampled step is equal to the time difference.
+    """
 
-    def __init__(self, params):
-        pass
+    def __init__(self, init, mu=0, sigma=1):
+        self.init = init
+        self.mu = mu
+        self.sigma = sigma
+
+    def step_forward_one(self):
+        next_step = self.init + np.random.normal(
+            mu=self.mu,
+            sigma=self.sigma)
+
+        return next_step
+
+    def step_forward_n(self, n):
+        next_step = self.init + np.random.normal(
+            mu=self.mu,
+            sigma=self.sigma*n)
+
+        return next_step
