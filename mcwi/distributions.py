@@ -2,69 +2,68 @@ import numpy as np
 import abc
 
 
-class DataType(abc.ABCMeta):
-
-    def __init__(self):
-        pass
-
-    @abc.abstractmethod
-    def step_forward_one(self):
-        """Move forward a single step in a random walk according to the
-        parameters of the distribution.
-
-        Returns
-        -------
-        next_step : float
-            The next step in the random walk, to be served to the consumer.
-        """
-        pass
-
-    @abc.abstractmethod
-    def step_forward_n(self, n):
-        """Move forward n steps in a random walk according to the parameters
-        of the distribution.
-
-        Parameters
-        ----------
-        n : int
-            Number of steps to move forward.
-
-        Returns
-        -------
-        next_step : float
-            The next step in the random walk, to be served to the consumer.
-        """
-        pass
-
-
-class BrownianMotion(DataType):
-    """A simple Brownian motion. The standard deviation of the normally-distributed
-    next sampled step is equal to the time difference.
-
-    See Also
-    --------
-    DataType
+class Distribution(metaclass=abc.ABCMeta):
+    """
+    Parameters 
+    ----------
+    params : **kwargs
+        Parameters of a probability distribution for streaming. The
+        streaming server will know the correct paramters at instantiation
+        so. 
     """
 
-    def __init__(self, init, mu=0, sigma=1):
-        self.current_value = init
-        self.mu = mu
-        self.sigma = sigma
+    def __init__(self, **params):
+       pass
 
-    def step_forward_one(self):
-        next_step = self.current_value + np.random.normal(
-            mu=self.mu,
-            sigma=self.sigma)
 
-        self.current_value = next_step
+    @abc.abstractmethod
+    def sample(self):
+        """Draw a sample from the defined distribution.
 
-        return next_step
+        Returns
+        -------
+        s : float
+            The latest sample from the Brownian motion.
+        """
 
-    def step_forward_n(self, n):
-        next_step = self.current_value + np.random.normal(
-            mu=self.mu,
-            sigma=self.sigma*n)
+        raise NotImplementedError(
+            "This is the base class, it has no probability of being useful.")
 
-        self.current_value = next_step
 
-        return next_step
+class BrownianMotion(Distribution):
+    """A simple Brownian motion (or Weiner Process). The standard deviation of
+    the normally-distributed next sampled step is equal to the time difference.
+
+    Parameters
+    ----------
+    start ; float,
+        Value from which we start walking.
+    dt : float
+        The time increment that passes with each tick.
+    delta : float, optional
+        The speed of the Brownian motion.
+    
+    See Also
+    --------
+    Distribution
+    """
+
+    def __init__(
+            self,
+            start,
+            dt,
+            delta=1):
+
+        self.last = start
+        self.dt = dt
+        self.delta = delta
+
+    def sample(self):
+        s = self.last + np.random.normal(
+            0,
+            self.delta*np.sqrt(self.dt))
+
+        self.last = s
+
+        return s
+        
