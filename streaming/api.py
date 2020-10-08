@@ -7,6 +7,7 @@ from mcwi.distributions import BrownianMotion
 
 app = create_app()
 
+
 @app.route('/generate-samples', methods=['POST'])
 def generate_samples():
     """
@@ -31,11 +32,12 @@ def generate_samples():
             char_data = np.char.mod('%f', data_buffer)[-num_samples:]
 
             sample_str = ','.join(char_data) + ','
- 
+
             yield bytes(sample_str[-num_samples * 8:], 'utf-8')
 
             # get rid of the last `num_samples` data points in the buffer
-            # shift the remaining data and rewrite the first `num_samples` data point
+            # shift the remaining data and rewrite the first `num_samples`
+            # data point
             data_buffer[:-num_samples] = data_buffer[num_samples:]
             data_buffer[-num_samples:] = np.array([
                 bm.sample() for x in range(num_samples)
@@ -43,8 +45,9 @@ def generate_samples():
 
     return Response(
         stream_with_context(generate(num_samples=10)),
-        #mimetype='text/csv',
+        # mimetype='text/csv',
     )
+
 
 if __name__ == '__main__':
     app.run(debug=True)
