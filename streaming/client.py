@@ -1,8 +1,11 @@
 import time
+from urllib.parse import urlparse
+
 import requests
 
 # server is http://localhost:5000/generate-samples
 
+ITER_BYTES_SIZE = 9
 
 class Client:
     """
@@ -11,52 +14,31 @@ class Client:
     might be smarter than trying to build our own iterator.
     """
 
-    def __init__(self, address):
-        self.server = address
+    def __init__(self, url):
+        self.server = url
 
-    # TODO: This methodology still results in some weird artifacts when
-    # pinging the server for samples. There might be a better way to handle
-    # the stream itself rather than just the raw bytes, beyond what we have
-    # looked at.
-    def generate_samples(self, N):
-        url = self.server + 'generate-samples'
-        r = requests.post(url, stream=True)
+        self._validate_server_address(self.server)
 
-        samples = []
+    def _validate_server_address(self, server_address):
+        result = urlparse(server_address)
 
-        previous_right = None
+        if result.scheme and result.netloc:
+            return True
 
-        left = None
-        right = None
+        raise ValueError("Server URL is not valid")
 
-        # is there a smarter way to estimate chunk size based on the number of
-        # samples?
-        for chunk in r.iter_content(9):
-            chunk = str(chunk)
-            chunk = chunk.replace("b", '')
-            chunk = chunk.replace("'", '')
+    def generate_samples(self, N, tick_size='s'):
+        response = self._request_data(
+            "generate-samples?tick_size={tick_size}&number_of_samples={N}".format(
+                tick_size=tick_size,
+                N=N,
+            ),
+        )
 
-            # print("CHUNK IS:", chunk)
+        return response.json()
 
-            data = str(chunk).split(',')
+    def _request_data(self, resource):
+        url = '/'.join([self.server, resource])
 
-            if len(data) > 1:
-                left, right = data
-
-                # print('left is:', left)
-                # print('right is:', right)
-
-                if previous_right is not None:
-                    left = previous_right + left
-                    # print("left is now:", left)
-                    samples.append(left)
-
-                previous_right = right
-            else:
-                previous_right = None
-
-            if len(samples) >= N:
-                break
-
-        # not floats yet, still strings
-        return samples
+        response = requests.post(url)
+        return response
