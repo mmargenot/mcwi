@@ -1,7 +1,12 @@
-from flask import Response, jsonify, request, g
+from flask import (
+    Response,
+    jsonify,
+    request,
+    g
+)
 import sqlite3
-
-import numpy as np
+import pickle
+import json
 
 from streaming import create_app
 from mcwi.distributions import BrownianMotion
@@ -18,17 +23,12 @@ MAX_TICKS_PER_TICK_SIZE = {
 SUPPORTED_DISTRIBUTIONS = {
     'brownian': BrownianMotion
 }
-# TODO: Instantiate server with distribution type and its parameters. Only
-# allow supported distributions.
-# TODO: Allow reconfiguration of server with different distributions and/or
-# parameters, so that users don't need to boot and reboot.
-
-# TODO: Have object held by the server that dictates the above ^ parameters
-# TODO: Write function to update that object.
-
 # TODO: Keep track of ticks that have passed since the last samples request.
 #       Should this information be stored in a table? `g` in Flask seems to be
 #       local to a given request, not truly global within the app.
+# TODO: Determine appropriate time dilations factors for real world timestamp
+#       vs. simulated time series ticks
+# TODO: Discuss options around simulating a live generating process.
 
 
 # Database connection pattern per:
@@ -42,9 +42,9 @@ def get_db():
         Connection to the sqlite3 database for the app.
     """
     if 'db' not in g:
-        g['db'] = connect_to_db()
+        g.db = connect_to_db()
 
-    return g['db']
+    return g.db
 
 
 def connect_to_db():
@@ -92,17 +92,28 @@ def generate_samples():
     """
     tick_size = request.args.get('tick_size')
     number_of_samples = int(request.args.get('number_of_samples'))
-    dist_type = request.args.get('dist')
 
     assert tick_size in SUPPORTED_TICK_SIZES
     tick_mod = MAX_TICKS_PER_TICK_SIZE[tick_size]
 
-    assert dist_type in SUPPORTED_DISTRIBUTIONS
     db = get_db()
-    params = load_dist_parameters(db)
+    c = db.cursor()
+    db_result = c.execute("SELECT * FROM parameters").fetchall()
+
+    if not db_result:
+        return jsonify(
+            message="Distribution must be set before sampling",
+            status_code=400
+        )
+
+    dist_type = db_result[0][0]
+    assert dist_type in SUPPORTED_DISTRIBUTIONS
+
+    params = pickle.loads(db_result[0][1])
     dist = SUPPORTED_DISTRIBUTIONS[dist_type](
-        *params
+        **params
     )
+
     data = {
         'samples': [],
         'tick_size': tick_size,
@@ -116,8 +127,56 @@ def generate_samples():
         data['samples'].append([tick, sample])
 
     # TODO: Modify parameter table to include most recent start values
+    #       (use the params dictionary combined with established table)
 
     return jsonify(data)
+
+
+def _pickle_params(params):
+    return pickle.dumps(params)
+
+
+# TODO: Add docstrings.
+# TODO: Handle corrected params passing from client.
+@app.route(
+    '/set-distribution',
+    methods=['POST'],
+)
+def set_distribution():
+    """
+    """
+    dist = request.args.get('distribution')
+    params = request.args.get('params')
+
+    params = json.loads(params)
+
+    params = _pickle_params(params)
+    params = sqlite3.Binary(params)
+
+    db = get_db()
+    c = db.cursor()
+
+    db_result = c.execute("SELECT * FROM parameters").fetchall()
+    try:
+        if not db_result:
+            c.execute(
+                "INSERT INTO parameters VALUES (?, ?)",
+                (dist, params)
+            )
+        else:
+            c.execute(
+                "UPDATE parameters "
+                "SET distribution = ?, params = ? "
+                "WHERE distribution = ? AND params = ?",
+                (dist, params, db_result[0][0], db_result[0][1])
+            )
+    except sqlite3.Error as e:
+        print('Error Occurred: ', str(e))
+
+    db.commit()
+    db.close()
+
+    return jsonify(message=f'Distribution set to {dist}', status_code=200)
 
 
 if __name__ == '__main__':

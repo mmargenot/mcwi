@@ -4,17 +4,16 @@ import abc
 
 class Distribution(metaclass=abc.ABCMeta):
     """
-    Parameters 
+    Parameters
     ----------
     params : **kwargs
         Parameters of a probability distribution for streaming. The
         streaming server will know the correct paramters at instantiation
-        so. 
+        so.
     """
 
     def __init__(self, **params):
-       pass
-
+        pass
 
     @abc.abstractmethod
     def sample(self):
@@ -42,7 +41,7 @@ class BrownianMotion(Distribution):
         The time increment that passes with each tick.
     delta : float, optional
         The speed of the Brownian motion.
-    
+
     See Also
     --------
     Distribution
@@ -66,4 +65,3 @@ class BrownianMotion(Distribution):
         self.last = s
 
         return s
-        
