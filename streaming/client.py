@@ -45,15 +45,15 @@ class Client:
         params : dictionary
             Parameters of the given distribution.
         """
+
+        params['distribution'] = dist
+        return self._set_distribution(params)
+
+    def _set_distribution(self, payload):
         response = self._request_data(
-            "set-distribution?"
-            "dist={dist}&"
-            "params={params}".format(
-                dist=dist,
-                params=params
-            )
+            "set-distribution",
+            json=payload
         )
-        # TODO: Pass params as json body instead of as query param
 
         return response.json()
 

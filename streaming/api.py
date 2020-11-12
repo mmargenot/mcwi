@@ -145,10 +145,9 @@ def _pickle_params(params):
 def set_distribution():
     """
     """
-    dist = request.args.get('distribution')
-    params = request.args.get('params')
-
-    params = json.loads(params)
+    payload = request.get_json()
+    params = json.loads(payload)
+    dist = params.pop('distribution')
 
     params = _pickle_params(params)
     params = sqlite3.Binary(params)
