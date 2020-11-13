@@ -6,7 +6,7 @@ from flask import (
 )
 import sqlite3
 import pickle
-import json
+import time
 
 from streaming import create_app
 from mcwi.distributions import BrownianMotion
@@ -23,12 +23,16 @@ MAX_TICKS_PER_TICK_SIZE = {
 SUPPORTED_DISTRIBUTIONS = {
     'brownian': BrownianMotion
 }
+
+CURRENT_TIME = 0
+PREVIOUS_TIME = None
+
+
 # TODO: Keep track of ticks that have passed since the last samples request.
 #       Should this information be stored in a table? `g` in Flask seems to be
 #       local to a given request, not truly global within the app.
 # TODO: Determine appropriate time dilations factors for real world timestamp
 #       vs. simulated time series ticks
-# TODO: Discuss options around simulating a live generating process.
 
 
 # Database connection pattern per:
@@ -110,6 +114,18 @@ def generate_samples():
     assert dist_type in SUPPORTED_DISTRIBUTIONS
 
     params = pickle.loads(db_result[0][1])
+
+    # TODO: Keep track of last query time to do time diffs and vol scaling for
+    #       later samples.
+
+    global CURRENT_TIME
+    global PREVIOUS_TIME
+
+    PREVIOUS_TIME = CURRENT_TIME
+    CURRENT_TIME = time.time()  # UNIX Time in seconds.nanoseconds
+
+    # Need a jump_dist and a subsequent_dist. How can we abstract these to
+    # allow for a variety in distributions when scaling the jump?
     dist = SUPPORTED_DISTRIBUTIONS[dist_type](
         **params
     )
@@ -126,8 +142,15 @@ def generate_samples():
 
         data['samples'].append([tick, sample])
 
-    # TODO: Modify parameter table to include most recent start values
-    #       (use the params dictionary combined with established table)
+    # Update start value for next iteration
+    new_params = params
+    new_params['start'] = data['samples'][1]
+    c.execute(
+        "UPDATE parameters "
+        "SET params = ? "
+        "WHERE params = ?",
+        (new_params, params)
+    )
 
     return jsonify(data)
 
@@ -137,7 +160,6 @@ def _pickle_params(params):
 
 
 # TODO: Add docstrings.
-# TODO: Handle corrected params passing from client.
 @app.route(
     '/set-distribution',
     methods=['POST'],
@@ -146,8 +168,9 @@ def set_distribution():
     """
     """
     payload = request.get_json()
-    params = json.loads(payload)
-    dist = params.pop('distribution')
+    # payload = json.loads(payload)
+    dist = payload['distribution']
+    params = payload['params']
 
     params = _pickle_params(params)
     params = sqlite3.Binary(params)
