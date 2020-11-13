@@ -1,4 +1,5 @@
 from urllib.parse import urlparse
+# import json
 
 import requests
 
@@ -45,9 +46,11 @@ class Client:
         params : dictionary
             Parameters of the given distribution.
         """
+        payload = {}
+        payload['distribution'] = dist
+        payload['params'] = params
 
-        params['distribution'] = dist
-        return self._set_distribution(params)
+        return self._set_distribution(payload)
 
     def _set_distribution(self, payload):
         response = self._request_data(
