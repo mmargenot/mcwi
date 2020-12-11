@@ -33,6 +33,16 @@ class DbConnector:
 
         return conn
 
+    def _load_dist_parameters(self):
+        c = self.db.cursor()
+        dist_params = c.execute(
+            'SELECT params FROM parameters'
+        )
+        dist_params = dist_params[0]
+        dist_params = dist_params.split(',')
+        dist_params = [float(p) for p in dist_params]
+        return dist_params
+
 class McwiApp:
     SUPPORTED_TICK_SIZES = ('s', 'm', 'h', 'd')
 
@@ -82,6 +92,42 @@ class McwiApp:
         self.DISTIRIBUTIONS[name] = cls
 
     def _set_distribution_handler(self):
+        payload = request.get_json()
+        params = json.loads(payload)
+        dist = params.pop('distribution')
+
+        params = _pickle_params(params)
+        params = sqlite3.Binary(params)
+
+        db = get_db()
+        c = db.cursor()
+
+        db_result = c.execute("SELECT * FROM parameters").fetchall()
+        try:
+            if not db_result:
+                c.execute(
+                    "INSERT INTO parameters VALUES (?, ?)",
+                    (dist, params)
+                )
+            else:
+                c.execute(
+                    "UPDATE parameters "
+                    "SET distribution = ?, params = ? "
+                    "WHERE distribution = ? AND params = ?",
+                    (dist, params, db_result[0][0], db_result[0][1])
+                )
+        except sqlite3.Error as e:
+            print('Error Occurred: ', str(e))
+
+        db.commit()
+        db.close()
+
+        return jsonify(
+            message='Distribution set to {dist}'.format(dist=dist),
+            status_code=200,
+        )
+
+    def _generate_samples_handler(self):
         # do the handling of the request here
         """
         Takes:
@@ -128,17 +174,3 @@ class McwiApp:
             #       (use the params dictionary combined with established table)
 
         return jsonify(data)
-
-    def _generate_samples_handler(self):
-        # do the handling of the request here
-        pass
-    
-    def _load_dist_parameters(self):
-        c = self.db.cursor()
-        dist_params = c.execute(
-            'SELECT params FROM parameters'
-        )
-        dist_params = dist_params[0]
-        dist_params = dist_params.split(',')
-        dist_params = [float(p) for p in dist_params]
-        return dist_params
