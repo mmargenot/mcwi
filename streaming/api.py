@@ -1,3 +1,4 @@
+import time
 from typing import NamedTuple
 from flask import jsonify, request
 
@@ -81,10 +82,11 @@ class DbConnector:
         return results
 
 class McwiApp:
-    SUPPORTED_TICK_SIZES = ('s', 'm', 'h', 'd')
+    SUPPORTED_TICK_SIZES = ('ms', 's', 'm', 'h', 'd')
 
     MAX_TICKS_PER_TICK_SIZE = {
-        's': 60,
+        'ms': 0.001,
+        's': 1,
         'm': 60,
         'h': 24,
         'd': 365,
@@ -93,6 +95,12 @@ class McwiApp:
     DISTRIBUTIONS = {
         'brownian': BrownianMotion
     }
+
+    CURRENT_TIME = 0
+    PREVIOUS_TIME = None
+    # TODO: Determine appropriate time dilations factors for real world timestamp
+    #       vs. simulated time series ticks. What is a reasonable value?
+    TIME_DILATION_FACTOR = 1
 
     def __init__(debug=True):
         self.debug = debug
@@ -173,7 +181,7 @@ class McwiApp:
         number_of_samples = int(request.args.get('number_of_samples'))
 
         assert tick_size in SUPPORTED_TICK_SIZES
-        tick_mod = MAX_TICKS_PER_TICK_SIZE[tick_size]
+        ticks = MAX_TICKS_PER_TICK_SIZE[tick_size]
 
         dp = self.db.get_distribution_parameters()
 
@@ -186,19 +194,29 @@ class McwiApp:
         assert dp.type in SUPPORTED_DISTRIBUTIONS
         
         params = pickle.loads(dp.params)
+
+        self.PREVIOUS_TIME = self.CURRENT_TIME
+        self.CURRENT_TIME = time.time()
+        
+        time_delta = self.CURRENT_TIME - self.PREVIOUS_TIME
+
         dist = SUPPORTED_DISTRIBUTIONS[dp.type](
             **params
         )
 
+        jump_sample = dist.handle_jump(
+            time_delta * ticks
+        )
+
         data = {
-            'samples': [],
+            'samples': [jump_sample],
             'tick_size': tick_size,
         }
         
-        for tick in range(1, number_of_samples + 1):
+        for tick in range(1, number_of_samples):
             sample = dist.sample()
             
-            tick = tick % tick_mod
+            tick = tick % ticks
             
             data['samples'].append([tick, sample])
 
