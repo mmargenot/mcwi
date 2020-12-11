@@ -1,210 +1,230 @@
-from flask import (
-    Response,
-    jsonify,
-    request,
-    g
-)
-import sqlite3
-import pickle
 import time
+from typing import NamedTuple
+from flask import jsonify, request
+
+import toolz.functools as tools
 
 from streaming import create_app
+
 from mcwi.distributions import BrownianMotion
 
-app = create_app()
+class DistributionParameters(NamedTuple):
+    type: str
+    params: dict
 
-SUPPORTED_TICK_SIZES = ['ms', 's', 'm', 'h', 'd']
-MAX_TICKS_PER_TICK_SIZE = {
-    'ms': 0.001,
-    's': 1,
-    'm': 60,
-    'h': 24,
-    'd': 365,
-}
-SUPPORTED_DISTRIBUTIONS = {
-    'brownian': BrownianMotion
-}
+class DbConnector:
 
-CURRENT_TIME = 0
-PREVIOUS_TIME = None
-TIME_DILATION_FACTOR = 1
-# TODO: Determine appropriate time dilations factors for real world timestamp
-#       vs. simulated time series ticks. What is a reasonable value?
+    def __init__(db_type='sqlite'):
+        self.db_type = db_type
 
+    def get_db_connection(self):
+        """Add a connection to the database to the request global variable set.
 
-# TODO: Keep track of ticks that have passed since the last samples request.
-#       Should this information be stored in a table? `g` in Flask seems to be
-#       local to a given request, not truly global within the app.
+        Returns
+        -------
+        Connection
+            Connection to the sqlite3 database for the app.
+        """
+        if self.db_type == 'sqlite':
+            db = _connect_to_sqlite_db()
 
+        self.cursor = db.cursor()
 
-# Database connection pattern per:
-# https://flask.palletsprojects.com/en/1.1.x/appcontext/
-def get_db():
-    """Add a connection to the database to the request global variable set.
-
-    Returns
-    -------
-    Connection
+        return db
+            
+    def _connect_to_sqlite_db(self):
+        """Connect to MCWI database.
+        
+        Returns
+        -------
+        conn : Connection
         Connection to the sqlite3 database for the app.
-    """
-    if 'db' not in g:
-        g.db = connect_to_db()
+        """
+        conn = sqlite3.connect('mcwi.db')
 
-    return g.db
+        return conn
 
-
-def connect_to_db():
-    """Connect to MCWI database.
-
-    Returns
-    -------
-    conn : Connection
-        Connection to the sqlite3 database for the app.
-    """
-    conn = sqlite3.connect('mcwi.db')
-
-    return conn
-
-
-@app.teardown_appcontext
-def teardown_db(exception):
-    """Close DB connection when killing app.
-    """
-    db = g.pop('db', None)
-    if db is not None:
-        db.close()
-
-
-def load_dist_parameters(db):
-    c = db.cursor()
-    dist_params = c.execute(
-        'SELECT params FROM parameters'
-    )
-    dist_params = dist_params[0]
-    dist_params = dist_params.split(',')
-    dist_params = [float(p) for p in dist_params]
-    return dist_params
-
-
-@app.route(
-    '/generate-samples',
-    methods=['POST'],
-)
-def generate_samples():
-    """
-    Takes:
-    - frequency
-    - n: number of samples
-    """
-    tick_size = request.args.get('tick_size')
-    number_of_samples = int(request.args.get('number_of_samples'))
-
-    assert tick_size in SUPPORTED_TICK_SIZES
-    ticks = MAX_TICKS_PER_TICK_SIZE[tick_size]
-
-    db = get_db()
-    c = db.cursor()
-    db_result = c.execute("SELECT * FROM parameters").fetchall()
-
-    if not db_result:
-        return jsonify(
-            message="Distribution must be set before sampling",
-            status_code=400
+    def _load_dist_parameters(self):
+        dist_params = self.cursor.execute(
+            'SELECT params FROM parameters'
         )
+        dist_params = dist_params[0]
+        dist_params = dist_params.split(',')
+        dist_params = [float(p) for p in dist_params]
+        return dist_params
 
-    dist_type = db_result[0][0]
-    assert dist_type in SUPPORTED_DISTRIBUTIONS
+    def get_distribution_parameters(self):
+        if not hasattr(self, 'cursor'):
+            raise ValueError("Need to establish a database connection first")
 
-    params = pickle.loads(db_result[0][1])
+        db_result = self.cursor.execute("SELECT * FROM parameters").fetchall()
 
-    global CURRENT_TIME
-    global PREVIOUS_TIME
+        dist_params = DistributionParameters(
+            type=db_result[0][0],
+            params=db_result[0][1],
+        )
+        return dist_params
 
-    PREVIOUS_TIME = CURRENT_TIME
-    CURRENT_TIME = time.time()
+    def insert_distribution_parameters(self, distribution, params):
+        results = self.cursor.execute(
+            "INSERT INTO parameters VALUES (?, ?)",
+            (dist, params)
+        )
+        return results
 
-    global TIME_DILATION_FACTOR
-    time_delta = CURRENT_TIME - PREVIOUS_TIME
-    time_delta = time_delta * TIME_DILATION_FACTOR
+    def update_distribution_parameters(self, old_distribution, old_params, new_distribution, new_params):
+        results = self.cursor.execute(
+            "UPDATE parameters "
+            "SET distribution = ?, params = ? "
+            "WHERE distribution = ? AND params = ?",
+            (new_distribution, new_params, old_distribution, old_params)
+        )
+        return results
 
-    dist = SUPPORTED_DISTRIBUTIONS[dist_type](
-        **params
-    )
+class McwiApp:
+    SUPPORTED_TICK_SIZES = ('ms', 's', 'm', 'h', 'd')
 
-    jump_sample = dist.handle_jump(
-        time_delta * ticks
-    )
-
-    data = {
-        'samples': [jump_sample],
-        'tick_size': tick_size,
+    MAX_TICKS_PER_TICK_SIZE = {
+        'ms': 0.001,
+        's': 1,
+        'm': 60,
+        'h': 24,
+        'd': 365,
     }
 
-    for tick in range(1, number_of_samples):
-        sample = dist.sample()
+    DISTRIBUTIONS = {
+        'brownian': BrownianMotion
+    }
 
-        tick = tick % ticks  # Is this useful?
+    CURRENT_TIME = 0
+    PREVIOUS_TIME = None
+    # TODO: Determine appropriate time dilations factors for real world timestamp
+    #       vs. simulated time series ticks. What is a reasonable value?
+    TIME_DILATION_FACTOR = 1
 
-        data['samples'].append([tick, sample])
+    def __init__(debug=True):
+        self.debug = debug
+        self.app = create_app()
 
-    # Update start value for next iteration
-    new_params = params
-    new_params['start'] = data['samples'][1]
-    c.execute(
-        "UPDATE parameters "
-        "SET params = ? "
-        "WHERE params = ?",
-        (new_params, params)
-    )
+        self._db_connector = DbConnector()
 
-    return jsonify(data)
+        self.add_endpoint(
+            endpoint='/set-distribution',
+            endpoint_name='set-distribution',
+            handler=self._set_distribution_handler,
+            methods=['POST'],
+        )
 
+        self.add_endpoint(
+            endpoint='/generate-samples',
+            endpoint_name='generate-samples',
+            handler=self._generate_samples_handler,
+            methods=['POST'],
+        )
 
-def _pickle_params(params):
-    return pickle.dumps(params)
+    def run(self):
+        self.app.run(self.debug)
+        self.db = self.db_connector.get_db_connection()
 
+    def add_endpoint(self, endpoint, endpoint_name, handler, methods):
+        self.app.add_url_rule(endpoint, endpoint_name, handler, methods=methods)
 
-# TODO: Add docstrings.
-@app.route(
-    '/set-distribution',
-    methods=['POST'],
-)
-def set_distribution():
-    """
-    """
-    payload = request.get_json()
-    # payload = json.loads(payload)
-    dist = payload['distribution']
-    params = payload['params']
+    def add_custom_distribution_type(self, name, cls):
+        # XXX: Another way to do this is add another endpoint
+        # that allows someone to send a name and code
+        # that subclasses the MCWI Distribution class
+        # and then the server executes that code
+        self.DISTIRIBUTIONS[name] = cls
 
-    params = _pickle_params(params)
-    params = sqlite3.Binary(params)
+    def _set_distribution_handler(self):
+        payload = request.get_json()
+        params = json.loads(payload)
 
-    db = get_db()
-    c = db.cursor()
+        dist = params.pop('distribution')
 
-    db_result = c.execute("SELECT * FROM parameters").fetchall()
-    try:
-        if not db_result:
-            c.execute(
-                "INSERT INTO parameters VALUES (?, ?)",
-                (dist, params)
+        # https://toolz.readthedocs.io/en/latest/api.html#toolz.functoolz.pipe
+        params = tools.pipe(params, pickle.dumps, sqlite3.Binary)
+
+        dp = self.db.get_distribution_parameters()
+        try:
+            if not dp:
+                self.db.insert_distribution_parameters(
+                    distribution=dist,
+                    params=params,
+                )
+            else:
+                self.db.update_distribution_parameters(
+                    old_distribution=dp.type,
+                    old_params=dp.params,
+                    new_distribution=dist,
+                    new_params=params,
+                )
+        except sqlite3.Error as e:
+            print('Error Occurred: ', str(e))
+
+        db.commit()
+        db.close()
+
+        return jsonify(
+            message='Distribution set to {dist}'.format(dist=dist),
+            status_code=200,
+        )
+
+    def _generate_samples_handler(self):
+        # do the handling of the request here
+        """
+        Takes:
+        - frequency
+        - n: number of samples
+        """
+        tick_size = request.args.get('tick_size')
+        number_of_samples = int(request.args.get('number_of_samples'))
+
+        assert tick_size in SUPPORTED_TICK_SIZES
+        ticks = MAX_TICKS_PER_TICK_SIZE[tick_size]
+
+        dp = self.db.get_distribution_parameters()
+
+        if not dp:
+            return jsonify(
+                message="Distribution must be set before sampling",
+                status_code=400
             )
-        else:
-            c.execute(
-                "UPDATE parameters "
-                "SET distribution = ?, params = ? "
-                "WHERE distribution = ? AND params = ?",
-                (dist, params, db_result[0][0], db_result[0][1])
-            )
-    except sqlite3.Error as e:
-        print('Error Occurred: ', str(e))
 
-    db.commit()
-    db.close()
+        assert dp.type in SUPPORTED_DISTRIBUTIONS
+        
+        params = pickle.loads(dp.params)
 
-    return jsonify(message=f'Distribution set to {dist}', status_code=200)
+        self.PREVIOUS_TIME = self.CURRENT_TIME
+        self.CURRENT_TIME = time.time()
+        
+        time_delta = self.CURRENT_TIME - self.PREVIOUS_TIME
 
+        dist = SUPPORTED_DISTRIBUTIONS[dp.type](
+            **params
+        )
+
+        jump_sample = dist.handle_jump(
+            time_delta * ticks
+        )
+
+        data = {
+            'samples': [jump_sample],
+            'tick_size': tick_size,
+        }
+        
+        for tick in range(1, number_of_samples):
+            sample = dist.sample()
+            
+            tick = tick % ticks
+            
+            data['samples'].append([tick, sample])
+
+            # TODO: Modify parameter table to include most recent start values
+            #       (use the params dictionary combined with established table)
+
+        return jsonify(data)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app = McwiApp()
+    app.run()
