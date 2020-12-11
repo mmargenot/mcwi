@@ -13,9 +13,10 @@ from mcwi.distributions import BrownianMotion
 
 app = create_app()
 
-SUPPORTED_TICK_SIZES = ['s', 'm', 'h', 'd']
+SUPPORTED_TICK_SIZES = ['ms', 's', 'm', 'h', 'd']
 MAX_TICKS_PER_TICK_SIZE = {
-    's': 60,
+    'ms': 0.001,
+    's': 1,
     'm': 60,
     'h': 24,
     'd': 365,
@@ -26,13 +27,14 @@ SUPPORTED_DISTRIBUTIONS = {
 
 CURRENT_TIME = 0
 PREVIOUS_TIME = None
+TIME_DILATION_FACTOR = 1
+# TODO: Determine appropriate time dilations factors for real world timestamp
+#       vs. simulated time series ticks. What is a reasonable value?
 
 
 # TODO: Keep track of ticks that have passed since the last samples request.
 #       Should this information be stored in a table? `g` in Flask seems to be
 #       local to a given request, not truly global within the app.
-# TODO: Determine appropriate time dilations factors for real world timestamp
-#       vs. simulated time series ticks
 
 
 # Database connection pattern per:
@@ -98,7 +100,7 @@ def generate_samples():
     number_of_samples = int(request.args.get('number_of_samples'))
 
     assert tick_size in SUPPORTED_TICK_SIZES
-    tick_mod = MAX_TICKS_PER_TICK_SIZE[tick_size]
+    ticks = MAX_TICKS_PER_TICK_SIZE[tick_size]
 
     db = get_db()
     c = db.cursor()
@@ -115,30 +117,33 @@ def generate_samples():
 
     params = pickle.loads(db_result[0][1])
 
-    # TODO: Keep track of last query time to do time diffs and vol scaling for
-    #       later samples.
-
     global CURRENT_TIME
     global PREVIOUS_TIME
 
     PREVIOUS_TIME = CURRENT_TIME
-    CURRENT_TIME = time.time()  # UNIX Time in seconds.nanoseconds
+    CURRENT_TIME = time.time()
 
-    # Need a jump_dist and a subsequent_dist. How can we abstract these to
-    # allow for a variety in distributions when scaling the jump?
+    global TIME_DILATION_FACTOR
+    time_delta = CURRENT_TIME - PREVIOUS_TIME
+    time_delta = time_delta * TIME_DILATION_FACTOR
+
     dist = SUPPORTED_DISTRIBUTIONS[dist_type](
         **params
     )
 
+    jump_sample = dist.handle_jump(
+        time_delta * ticks
+    )
+
     data = {
-        'samples': [],
+        'samples': [jump_sample],
         'tick_size': tick_size,
     }
 
-    for tick in range(1, number_of_samples + 1):
+    for tick in range(1, number_of_samples):
         sample = dist.sample()
 
-        tick = tick % tick_mod
+        tick = tick % ticks  # Is this useful?
 
         data['samples'].append([tick, sample])
 
