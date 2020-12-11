@@ -1,7 +1,15 @@
+from typing import NamedTuple
 from flask import jsonify, request
+
+import toolz.functools as tools
+
 from streaming import create_app
 
 from mcwi.distributions import BrownianMotion
+
+class DistributionParameters(NamedTuple):
+    type: str
+    params: dict
 
 class DbConnector:
 
@@ -19,6 +27,8 @@ class DbConnector:
         if self.db_type == 'sqlite':
             db = _connect_to_sqlite_db()
 
+        self.cursor = db.cursor()
+
         return db
             
     def _connect_to_sqlite_db(self):
@@ -34,14 +44,41 @@ class DbConnector:
         return conn
 
     def _load_dist_parameters(self):
-        c = self.db.cursor()
-        dist_params = c.execute(
+        dist_params = self.cursor.execute(
             'SELECT params FROM parameters'
         )
         dist_params = dist_params[0]
         dist_params = dist_params.split(',')
         dist_params = [float(p) for p in dist_params]
         return dist_params
+
+    def get_distribution_parameters(self):
+        if not hasattr(self, 'cursor'):
+            raise ValueError("Need to establish a database connection first")
+
+        db_result = self.cursor.execute("SELECT * FROM parameters").fetchall()
+
+        dist_params = DistributionParameters(
+            type=db_result[0][0],
+            params=db_result[0][1],
+        )
+        return dist_params
+
+    def insert_distribution_parameters(self, distribution, params):
+        results = self.cursor.execute(
+            "INSERT INTO parameters VALUES (?, ?)",
+            (dist, params)
+        )
+        return results
+
+    def update_distribution_parameters(self, old_distribution, old_params, new_distribution, new_params):
+        results = self.cursor.execute(
+            "UPDATE parameters "
+            "SET distribution = ?, params = ? "
+            "WHERE distribution = ? AND params = ?",
+            (new_distribution, new_params, old_distribution, old_params)
+        )
+        return results
 
 class McwiApp:
     SUPPORTED_TICK_SIZES = ('s', 'm', 'h', 'd')
@@ -61,7 +98,7 @@ class McwiApp:
         self.debug = debug
         self.app = create_app()
 
-        self.db_connector = DbConnector()
+        self._db_connector = DbConnector()
 
         self.add_endpoint(
             endpoint='/set-distribution',
@@ -94,27 +131,25 @@ class McwiApp:
     def _set_distribution_handler(self):
         payload = request.get_json()
         params = json.loads(payload)
+
         dist = params.pop('distribution')
 
-        params = _pickle_params(params)
-        params = sqlite3.Binary(params)
+        # https://toolz.readthedocs.io/en/latest/api.html#toolz.functoolz.pipe
+        params = tools.pipe(params, pickle.dumps, sqlite3.Binary)
 
-        db = get_db()
-        c = db.cursor()
-
-        db_result = c.execute("SELECT * FROM parameters").fetchall()
+        dp = self.db.get_distribution_parameters()
         try:
-            if not db_result:
-                c.execute(
-                    "INSERT INTO parameters VALUES (?, ?)",
-                    (dist, params)
+            if not dp:
+                self.db.insert_distribution_parameters(
+                    distribution=dist,
+                    params=params,
                 )
             else:
-                c.execute(
-                    "UPDATE parameters "
-                    "SET distribution = ?, params = ? "
-                    "WHERE distribution = ? AND params = ?",
-                    (dist, params, db_result[0][0], db_result[0][1])
+                self.db.update_distribution_parameters(
+                    old_distribution=dp.type,
+                    old_params=dp.params,
+                    new_distribution=dist,
+                    new_params=params,
                 )
         except sqlite3.Error as e:
             print('Error Occurred: ', str(e))
@@ -140,21 +175,18 @@ class McwiApp:
         assert tick_size in SUPPORTED_TICK_SIZES
         tick_mod = MAX_TICKS_PER_TICK_SIZE[tick_size]
 
-        c = self.db.cursor()
-        # TODO: Move this select to the db connector
-        db_result = c.execute("SELECT * FROM parameters").fetchall()
+        dp = self.db.get_distribution_parameters()
 
-        if not db_result:
+        if not dp:
             return jsonify(
                 message="Distribution must be set before sampling",
                 status_code=400
             )
 
-        dist_type = db_result[0][0]
-        assert dist_type in SUPPORTED_DISTRIBUTIONS
+        assert dp.type in SUPPORTED_DISTRIBUTIONS
         
-        params = pickle.loads(db_result[0][1])
-        dist = SUPPORTED_DISTRIBUTIONS[dist_type](
+        params = pickle.loads(dp.params)
+        dist = SUPPORTED_DISTRIBUTIONS[dp.type](
             **params
         )
 
@@ -174,3 +206,7 @@ class McwiApp:
             #       (use the params dictionary combined with established table)
 
         return jsonify(data)
+
+if __name__ == '__main__':
+    app = McwiApp()
+    app.run()
