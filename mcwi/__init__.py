@@ -1,2 +1,2 @@
-import streaming
-import distributions
+from . import streaming
+from . import distributions
