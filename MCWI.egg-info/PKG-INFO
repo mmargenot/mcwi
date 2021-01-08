@@ -1,0 +1,11 @@
+Metadata-Version: 1.2
+Name: MCWI
+Version: 0.0.1
+Summary: Synthetic data streaming for testing time series models.
+Home-page: https://github.com/mmargenot/mcwi
+Author: Max Margenot
+Author-email: max.margenot@gmail.com
+License: UNKNOWN
+Description: UNKNOWN
+Platform: UNKNOWN
+Requires-Python: >=3.6

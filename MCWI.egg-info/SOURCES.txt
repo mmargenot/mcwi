@@ -1,0 +1,12 @@
+setup.py
+MCWI.egg-info/PKG-INFO
+MCWI.egg-info/SOURCES.txt
+MCWI.egg-info/dependency_links.txt
+MCWI.egg-info/top_level.txt
+mcwi/__init__.py
+mcwi/distributions.py
+mcwi/mcwi.py
+mcwi/streaming/__init__.py
+mcwi/streaming/api.py
+mcwi/streaming/client.py
+mcwi/streaming/server.py
