@@ -2,9 +2,9 @@ import time
 from typing import NamedTuple
 from flask import jsonify, request
 
-import toolz.functools as tools
+import toolz.functoolz as tools
 
-from streaming import create_app
+from . import create_app
 
 from mcwi.distributions import BrownianMotion
 

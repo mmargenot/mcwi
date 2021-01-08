@@ -1,3 +1,7 @@
+from . import api
+from . import client
+from . import server
+
 from flask import Flask
 import sqlite3
 import time
