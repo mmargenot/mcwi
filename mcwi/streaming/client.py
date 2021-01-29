@@ -49,6 +49,7 @@ class Client:
         payload = {}
         payload['distribution'] = dist
         payload['params'] = params
+        import pdb; pdb.set_trace();
 
         return self._set_distribution(payload)
 

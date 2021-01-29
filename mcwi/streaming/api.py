@@ -135,8 +135,8 @@ class McwiApp:
             methods=['POST'],
         )
 
-    def run(self):
-        self.app.run(self.debug)
+    def run(self, host='0.0.0.0', port=5000):
+        self.app.run(debug=self.debug, host=host, port=port)
         self.db = self.db_connector.get_db_connection()
 
     def add_endpoint(self, endpoint, endpoint_name, handler, methods):
@@ -155,6 +155,7 @@ class McwiApp:
         self.DISTIRIBUTIONS[name] = cls
 
     def _set_distribution_handler(self):
+        import pdb; pdb.set_trace();
         payload = request.get_json()
         params = json.loads(payload)
 
@@ -242,8 +243,3 @@ class McwiApp:
             #       (use the params dictionary combined with established table)
 
         return jsonify(data)
-
-
-if __name__ == '__main__':
-    app = McwiApp()
-    app.run()

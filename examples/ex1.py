@@ -25,10 +25,10 @@ app = mcwi.streaming.api.McwiApp()
 server = Process(target=app.run)
 server.start()
 
-mcwi_client = mcwi.streaming.client.Client(url='http://localhost:5000')
+mcwi_client = mcwi.streaming.client.Client(url='http://0.0.0.0:5000')
 mcwi_client.set_distribution(
     'brownian',
-    {'start': 100, 'sigma': 1}
+    {"start": 100, "sigma": 1}
 )
 
 s = mcwi_client.generate_samples(100)
