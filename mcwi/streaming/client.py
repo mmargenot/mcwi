@@ -49,14 +49,13 @@ class Client:
         payload = {}
         payload['distribution'] = dist
         payload['params'] = params
-        import pdb; pdb.set_trace();
 
         return self._set_distribution(payload)
 
     def _set_distribution(self, payload):
         response = self._request_data(
             "set-distribution",
-            json=payload
+            json=payload,
         )
 
         return response.json()
@@ -64,5 +63,6 @@ class Client:
     def _request_data(self, resource, json=None):
         url = '/'.join([self.server, resource])
 
+        breakpoint()
         response = requests.post(url, json=json)
         return response

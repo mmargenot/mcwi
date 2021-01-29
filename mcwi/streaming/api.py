@@ -122,14 +122,14 @@ class McwiApp:
         self._db_connector = DbConnector()
 
         self.add_endpoint(
-            endpoint='/set-distribution',
+            rule='/',
             endpoint_name='set-distribution',
             handler=self._set_distribution_handler,
             methods=['POST'],
         )
 
         self.add_endpoint(
-            endpoint='/generate-samples',
+            rule='/',
             endpoint_name='generate-samples',
             handler=self._generate_samples_handler,
             methods=['POST'],
@@ -139,12 +139,12 @@ class McwiApp:
         self.app.run(debug=self.debug, host=host, port=port)
         self.db = self.db_connector.get_db_connection()
 
-    def add_endpoint(self, endpoint, endpoint_name, handler, methods):
+    def add_endpoint(self, rule, endpoint_name, handler, methods):
         self.app.add_url_rule(
-            endpoint,
-            endpoint_name,
-            handler,
-            methods=methods
+            rule=rule,
+            endpoint=endpoint_name,
+            view_func=handler,
+            methods=methods,
         )
 
     def add_custom_distribution_type(self, name, cls):
@@ -243,3 +243,7 @@ class McwiApp:
             #       (use the params dictionary combined with established table)
 
         return jsonify(data)
+
+if __name__ == "__main__":
+    app = McwiApp()
+    app.run()
