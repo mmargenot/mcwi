@@ -11,7 +11,7 @@ itsdangerous==1.1.0
 jedi==0.17.2
 Jinja2==2.11.2
 MarkupSafe==1.1.1
-numpy==1.18.5
+numpy==1.22.0
 parso==0.7.1
 pexpect==4.8.0
 pickleshare==0.7.5
